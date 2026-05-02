@@ -1,0 +1,19 @@
+{
+  "name": "ra2311008050002-campus-notification-system",
+  "version": "1.0.0",
+  "description": "Campus Notification System — Vehicle Maintenance Scheduler + Priority Notification Inbox",
+  "author": "Giriprasanth M (RA2311008050002)",
+  "license": "ISC",
+  "scripts": {
+    "start:vehicle": "node vehicle_scheduling/index.js",
+    "start:notification": "node notification_app_be/index.js",
+    "test:auth": "node testAuth.js",
+    "test:endpoints": "node testEndpoints.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
