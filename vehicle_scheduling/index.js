@@ -1,76 +1,33 @@
-/**
- * index.js — Express application for the Vehicle Maintenance Scheduler Microservice.
- * Port: 8000
- *
- * Endpoints:
- *   GET /health                  — Service health check
- *   GET /api/schedule            — Optimal schedule for ALL depots
- *   GET /api/schedule/:depotId   — Optimal schedule for a specific depot
- *
- * Algorithm: 0/1 Knapsack (bottom-up DP) — no external algorithm libraries used.
- *
- * BUG FIX #1: Token is fetched FIRST, THEN Log() is called.
- *             In the Python version, Log() was called before the token existed → crash.
- */
-
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const express = require('express');
 const cors    = require('cors');
-
 const { getAuthToken }                          = require('./auth');
 const { fetchDepots, fetchVehicles, knapsackSchedule } = require('./scheduler');
 const { Log }                                   = require('../logging_middleware/logger');
-
 const app  = express();
 const PORT = 8000;
-
-// ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
 app.use(cors());
 app.use(express.json());
-
-// ---------------------------------------------------------------------------
-// Startup: Authenticate FIRST, then log (BUG FIX #1)
-// ---------------------------------------------------------------------------
 async function startup() {
   try {
-    // Step 1: Get token — do NOT call Log() before this succeeds
     const token = await getAuthToken();
     process.env.ACCESS_TOKEN = token;
-
-    // Step 2: Now it's safe to call Log() — token is in process.env
     await Log('backend', 'info', 'config', 'Vehicle Maintenance Scheduler service starting up');
     await Log('backend', 'info', 'auth', 'Bearer token acquired and stored successfully');
-
     app.listen(PORT, () => {
       console.log(`[VehicleScheduler] Server running at http://localhost:${PORT}`);
       console.log(`[VehicleScheduler] Health check: http://localhost:${PORT}/health`);
       console.log(`[VehicleScheduler] Schedule:     http://localhost:${PORT}/api/schedule`);
     });
   } catch (err) {
-    // We can't call Log() here if token fetch failed — log to console only
     console.error(`[VehicleScheduler] FATAL: Startup authentication failed: ${err.message}`);
     process.exit(1);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
-/**
- * GET /health — Service health check
- */
 app.get('/health', async (req, res) => {
   await Log('backend', 'debug', 'route', 'Health check endpoint called');
   res.json({ status: 'healthy', service: 'vehicle-maintenance-scheduler' });
 });
-
-
-/**
- * GET /evaluation-service/depots — Fetch raw depots list (proxy to Affordmed API)
- */
 app.get('/evaluation-service/depots', async (req, res) => {
   await Log('backend', 'info', 'route', 'GET /evaluation-service/depots — fetching raw depots');
   try {
@@ -81,11 +38,6 @@ app.get('/evaluation-service/depots', async (req, res) => {
     res.status(502).json({ error: 'external_api_error', detail: err.message });
   }
 });
-
-
-/**
- * GET /evaluation-service/vehicles — Fetch raw vehicles list (proxy to Affordmed API)
- */
 app.get('/evaluation-service/vehicles', async (req, res) => {
   await Log('backend', 'info', 'route', 'GET /evaluation-service/vehicles — fetching raw vehicles');
   try {
@@ -96,35 +48,22 @@ app.get('/evaluation-service/vehicles', async (req, res) => {
     res.status(502).json({ error: 'external_api_error', detail: err.message });
   }
 });
-
-
-/**
- * GET /api/schedule — Optimal schedule for ALL depots
- */
 app.get('/api/schedule', async (req, res) => {
   await Log('backend', 'info', 'route', 'GET /api/schedule — full schedule requested');
-
   try {
-    // Fetch external data
     const depots = await fetchDepots();
     await Log('backend', 'info', 'service',
       `Successfully fetched ${depots.length} depots from evaluation API`);
-
     const vehicles = await fetchVehicles();
     await Log('backend', 'info', 'service',
       `Successfully fetched ${vehicles.length} vehicle tasks from evaluation API`);
-
-    // Compute knapsack schedule per depot
     const schedules = [];
     for (const depot of depots) {
       const depotId = depot.ID;
       const budget  = depot.MechanicHours;
-
       await Log('backend', 'debug', 'domain',
         `Running knapsack for depot ${depotId} with budget=${budget}h, tasks=${vehicles.length}`);
-
       const { selected, totalImpact, totalDuration } = knapsackSchedule(vehicles, budget);
-
       schedules.push({
         depot_id:                depotId,
         mechanic_hours_budget:   budget,
@@ -134,20 +73,16 @@ app.get('/api/schedule', async (req, res) => {
         tasks_scheduled_count:   selected.length,
         scheduled_tasks:         selected,
       });
-
       await Log('backend', 'info', 'domain',
         `Depot ${depotId}: ${selected.length} tasks scheduled | Impact=${totalImpact} | Hours=${totalDuration}/${budget}`);
     }
-
     await Log('backend', 'info', 'service',
       `Schedule computation complete for all ${depots.length} depots`);
-
     res.json({
       status:       'success',
       total_depots: schedules.length,
       schedules,
     });
-
   } catch (err) {
     const isExternal = err.message.includes('Failed to fetch');
     await Log('backend', isExternal ? 'error' : 'fatal', 'handler',
@@ -158,25 +93,16 @@ app.get('/api/schedule', async (req, res) => {
     });
   }
 });
-
-
-/**
- * GET /api/schedule/:depotId — Optimal schedule for a specific depot
- */
 app.get('/api/schedule/:depotId', async (req, res) => {
   const depotId = parseInt(req.params.depotId, 10);
-
   if (isNaN(depotId)) {
     return res.status(400).json({ error: 'bad_request', detail: 'depotId must be an integer' });
   }
-
   await Log('backend', 'info', 'route',
     `GET /api/schedule/${depotId} — depot-specific schedule requested`);
-
   try {
     const depots = await fetchDepots();
     const depot  = depots.find((d) => d.ID === depotId);
-
     if (!depot) {
       const available = depots.map((d) => d.ID);
       await Log('backend', 'warn', 'handler',
@@ -187,20 +113,15 @@ app.get('/api/schedule/:depotId', async (req, res) => {
         available_depot_ids: available,
       });
     }
-
     const vehicles = await fetchVehicles();
     await Log('backend', 'info', 'service',
       `Fetched ${vehicles.length} vehicle tasks for depot ${depotId} schedule`);
-
     const budget = depot.MechanicHours;
     await Log('backend', 'debug', 'domain',
       `Running knapsack for depot ${depotId}: budget=${budget}h, tasks=${vehicles.length}`);
-
     const { selected, totalImpact, totalDuration } = knapsackSchedule(vehicles, budget);
-
     await Log('backend', 'info', 'domain',
       `Depot ${depotId} schedule: ${selected.length} tasks | Impact=${totalImpact} | Hours=${totalDuration}/${budget}`);
-
     res.json({
       status:                   'success',
       depot_id:                 depotId,
@@ -211,7 +132,6 @@ app.get('/api/schedule/:depotId', async (req, res) => {
       tasks_scheduled_count:    selected.length,
       scheduled_tasks:          selected,
     });
-
   } catch (err) {
     const isExternal = err.message.includes('Failed to fetch');
     await Log('backend', isExternal ? 'error' : 'fatal', 'handler',
@@ -222,8 +142,4 @@ app.get('/api/schedule/:depotId', async (req, res) => {
     });
   }
 });
-
-// ---------------------------------------------------------------------------
-// Start server
-// ---------------------------------------------------------------------------
 startup();

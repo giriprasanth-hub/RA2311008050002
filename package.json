@@ -6,9 +6,7 @@
   "license": "ISC",
   "scripts": {
     "start:vehicle": "node vehicle_scheduling/index.js",
-    "start:notification": "node notification_app_be/index.js",
-    "test:auth": "node testAuth.js",
-    "test:endpoints": "node testEndpoints.js"
+    "start:notification": "node notification_app_be/index.js"
   },
   "dependencies": {
     "axios": "^1.6.8",
